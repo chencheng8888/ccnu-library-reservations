@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  library-reservations:
+    build:
+      context: .         # 当前目录包含 Dockerfile 和代码
+      dockerfile: Dockerfile
+    container_name: library-reservations
+    ports:
+      - "15147:15147"    # 映射主机端口
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./logs:/app      # 将日志挂载到宿主机 ./logs 目录，便于查看 done_tasks.log 和 failed_tasks.log
+    restart: "always"  # 容器崩溃后自动重启
