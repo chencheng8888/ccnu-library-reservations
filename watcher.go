@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 )
@@ -347,6 +348,67 @@ func (w *watcher) Watch(ctx context.Context) {
 					w.addFailedTask(task)
 				}
 			}
+        case <-time.After(24 * time.Hour):
+            
 		}
 	}
+}
+
+func (w *watcher) writeToLog() error {
+	// 拷贝 doneTasks
+	w.doneMutex.Lock()
+	doneTasks := make([]Action, len(w.doneTasks))
+	copy(doneTasks, w.doneTasks)
+	w.doneTasks = nil // 清空原始 slice
+	w.doneMutex.Unlock()
+
+	// 拷贝 failedTasks
+	w.failedMutex.Lock()
+	failedTasks := make([]Task, len(w.failedTasks))
+	copy(failedTasks, w.failedTasks)
+	w.failedTasks = nil // 清空原始 slice
+	w.failedMutex.Unlock()
+
+	// 写入 done_tasks.log
+	doneFile, err := os.OpenFile("done_tasks.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open done_tasks.log: %w", err)
+	}
+	defer doneFile.Close()
+
+	for _, task := range doneTasks {
+		line := fmt.Sprintf("%s,%s,%s,%s,%s,%s\n",
+			task.stuID,
+			task.startTime.Format(time.RFC3339),
+			task.endTime.Format(time.RFC3339),
+			task.roomID,
+			task.seatID,
+			SUCCESS,
+		)
+		if _, err := doneFile.WriteString(line); err != nil {
+			return fmt.Errorf("failed writing to done_tasks.log: %w", err)
+		}
+	}
+
+	// 写入 failed_tasks.log
+	failedFile, err := os.OpenFile("failed_tasks.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open failed_tasks.log: %w", err)
+	}
+	defer failedFile.Close()
+
+	for _, task := range failedTasks {
+		line := fmt.Sprintf("%s,%s,%s,%s,%s\n",
+			task.stuID,
+			task.startTime.Format(time.RFC3339),
+			task.endTime.Format(time.RFC3339),
+			task.roomID,
+			FAILED,
+		)
+		if _, err := failedFile.WriteString(line); err != nil {
+			return fmt.Errorf("failed writing to failed_tasks.log: %w", err)
+		}
+	}
+
+	return nil
 }
