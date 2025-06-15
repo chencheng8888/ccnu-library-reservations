@@ -113,12 +113,7 @@ func (app *App) setupRoutes() {
             return
         }
 
-		if err := app.w.AddTask(c, Task{
-			stuID:     req.StuID,
-			startTime: startTime,
-			endTime:   endTime,
-			roomID:    req.RoomID,
-		}); err != nil {
+		if err := app.w.AddTask(c, NewTask(req.StuID,req.RoomID,startTime,endTime)); err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}

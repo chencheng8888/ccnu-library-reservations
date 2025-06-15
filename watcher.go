@@ -7,11 +7,30 @@ import (
 	"time"
 )
 
+const (
+	SUCCESS   = "success"
+	FAILED    = "failed"
+	PENDING   = "pending"
+	RUNNING   = "running"
+	CANCELLED = "cancelled"
+)
+
 type Task struct {
 	stuID     string
 	startTime time.Time
 	endTime   time.Time
 	roomID    string
+	status    string
+}
+
+func NewTask(stuID,roomID string,startTime,endTime time.Time) Task {
+    return Task{
+        stuID:     stuID,
+        roomID:    roomID,
+        startTime: RoundUpToNext5Min(startTime),
+        endTime:   RoundUpToNext5Min(endTime),
+        status:   PENDING,
+    }
 }
 
 func (t *Task) Check() error {
@@ -21,7 +40,6 @@ func (t *Task) Check() error {
 
 	currentTime := GetCurrentShanghaiTime()
 
-	// 如果开始时间早于当前时间，只允许是今天
 	if t.startTime.Before(currentTime) {
 		if !(t.startTime.Year() == currentTime.Year() &&
 			t.startTime.Month() == currentTime.Month() &&
@@ -34,7 +52,6 @@ func (t *Task) Check() error {
 		return fmt.Errorf("invalid task: end time is before start time")
 	}
 
-	// 判断时间段是否在允许的营业时间内
 	loc := t.startTime.Location()
 	weekday := t.startTime.Weekday()
 	isFriday := weekday == time.Friday
@@ -53,7 +70,6 @@ func (t *Task) Check() error {
 		return fmt.Errorf("invalid task: task time must be within %02d:%02d - %02d:%02d (Friday until 14:00)", 7, 30, closeHour, closeMin)
 	}
 
-	// 判断时间段长度是否在 1 到 14 小时之间
 	duration := t.endTime.Sub(t.startTime)
 	if duration < time.Hour || duration > 14*time.Hour {
 		return fmt.Errorf("invalid task: duration must be between 1 and 14 hours")
@@ -62,11 +78,9 @@ func (t *Task) Check() error {
 	return nil
 }
 
-
-
 type Action struct {
 	Task
-	seatID string // seatID is the device ID of the seat
+	seatID string
 }
 
 type Watcher interface {
@@ -80,25 +94,28 @@ type watcher struct {
 	a Auther
 	r Reverser
 
-	userMap map[string]struct{} // stuID -> struct{} to track unique users
+	userMap map[string]struct{}
+	userMapMutex sync.RWMutex
 
-	runningUserMap map[string]struct{}
+	// 任务分状态存储
+	pendingTasks map[string]Task       // stuID -> Task
+	runningTasks map[string]Task       // stuID -> Task
+	doneTasks    []Action
+	failedTasks  []Task
 
-	undoTasks []Task
-
-	doneTasks   []Action
-	failedTasks []Task
-
-	userMapMutex, runningUserMutex, undoTaskMutex, doneTaskMutex, failedTaskMutex sync.RWMutex
-
+	pendingMutex sync.RWMutex
+	runningMutex sync.RWMutex
+	doneMutex    sync.RWMutex
+	failedMutex  sync.RWMutex
 }
 
 func NewWatcher(a Auther, r Reverser) Watcher {
 	return &watcher{
-		a:              a,
-		r:              r,
-		userMap:        make(map[string]struct{}),
-		runningUserMap: make(map[string]struct{}),
+		a:            a,
+		r:            r,
+		userMap:      make(map[string]struct{}),
+		pendingTasks: make(map[string]Task),
+		runningTasks: make(map[string]Task),
 	}
 }
 
@@ -106,7 +123,6 @@ func (w *watcher) RegisterUser(ctx context.Context, stuID, password string) erro
 	if stuID == "" || password == "" {
 		return fmt.Errorf("invalid user: stuID or password is empty")
 	}
-
 	w.userMapMutex.Lock()
 	defer w.userMapMutex.Unlock()
 
@@ -115,105 +131,113 @@ func (w *watcher) RegisterUser(ctx context.Context, stuID, password string) erro
 }
 
 func (w *watcher) AddTask(ctx context.Context, task Task) error {
-
 	if err := task.Check(); err != nil {
 		return fmt.Errorf("task check failed: %w", err)
 	}
 
-	w.userMapMutex.Lock()
-	defer w.userMapMutex.Unlock()
+	w.userMapMutex.RLock()
 	if _, exists := w.userMap[task.stuID]; !exists {
-		return fmt.Errorf("task check failed: user %s is not exist", task.stuID)
+		w.userMapMutex.RUnlock()
+		return fmt.Errorf("task check failed: user %s does not exist", task.stuID)
+	}
+	w.userMapMutex.RUnlock()
+
+	// 先检查是否已有 pending 或 running 任务
+	w.pendingMutex.RLock()
+	_, inPending := w.pendingTasks[task.stuID]
+	w.pendingMutex.RUnlock()
+
+	w.runningMutex.RLock()
+	_, inRunning := w.runningTasks[task.stuID]
+	w.runningMutex.RUnlock()
+
+	if inPending || inRunning {
+		return fmt.Errorf("task check failed: user %s already has a task", task.stuID)
 	}
 
-	w.runningUserMutex.Lock()
-	defer w.runningUserMutex.Unlock()
-	if _, exists := w.runningUserMap[task.stuID]; exists {
-		return fmt.Errorf("task check failed: user %s has had task", task.stuID)
-	}
+	task.status = PENDING
 
-	w.runningUserMap[task.stuID] = struct{}{}
-
-	w.undoTaskMutex.Lock()
-	defer w.undoTaskMutex.Unlock()
-	w.undoTasks = append(w.undoTasks, task)
+	w.pendingMutex.Lock()
+	w.pendingTasks[task.stuID] = task
+	w.pendingMutex.Unlock()
 
 	return nil
 }
 
 func (w *watcher) RemoveTask(ctx context.Context, stuID string) error {
-	// 先检查用户是否存在
 	w.userMapMutex.RLock()
-	defer w.userMapMutex.RUnlock()
-
 	if _, exists := w.userMap[stuID]; !exists {
-		return fmt.Errorf("task check failed: user %s is not exist", stuID)
+		w.userMapMutex.RUnlock()
+		return fmt.Errorf("task check failed: user %s does not exist", stuID)
 	}
+	w.userMapMutex.RUnlock()
 
-	// 再检查用户是否有任务
-	w.runningUserMutex.Lock()
-	defer w.runningUserMutex.Unlock()
-
-	if _, exists := w.runningUserMap[stuID]; !exists {
-		return fmt.Errorf("task check failed: user %s has 0 task", stuID)
+	// 尝试从 pending 中删除
+	w.pendingMutex.Lock()
+	if _, exists := w.pendingTasks[stuID]; exists {
+		delete(w.pendingTasks, stuID)
+		w.pendingMutex.Unlock()
+		return nil
 	}
+	w.pendingMutex.Unlock()
 
-	w.undoTaskMutex.Lock()
-	defer w.undoTaskMutex.Unlock()
+	// 如果在 running 任务中，标记取消（这里简单示例直接从 running 删除并加入 failed）
+	w.runningMutex.Lock()
+	if task, exists := w.runningTasks[stuID]; exists {
+		delete(w.runningTasks, stuID)
+		w.runningMutex.Unlock()
 
-	var idx int
-	for idx = 0; idx < len(w.undoTasks); idx++ {
-		if w.undoTasks[idx].stuID == stuID {
-			break
-		}
+		// 变更状态为 cancelled 记入失败任务
+		task.status = CANCELLED
+		w.failedMutex.Lock()
+		w.failedTasks = append(w.failedTasks, task)
+		w.failedMutex.Unlock()
+		return nil
 	}
+	w.runningMutex.Unlock()
 
-	if idx == len(w.undoTasks) {
-		return fmt.Errorf("task check failed: user %s has no task", stuID)
-	}
-
-	w.undoTasks = append(w.undoTasks[:idx], w.undoTasks[idx+1:]...)
-
-	delete(w.runningUserMap, stuID)
-
-	return nil
+	return fmt.Errorf("task check failed: user %s has no task to remove", stuID)
 }
 
 func (w *watcher) addDoneTask(action Action) {
-	w.doneTaskMutex.Lock()
-	defer w.doneTaskMutex.Unlock()
+	w.doneMutex.Lock()
+	defer w.doneMutex.Unlock()
 	w.doneTasks = append(w.doneTasks, action)
 }
 
 func (w *watcher) addFailedTask(task Task) {
-	w.failedTaskMutex.Lock()
-	defer w.failedTaskMutex.Unlock()
+	w.failedMutex.Lock()
+	defer w.failedMutex.Unlock()
 	w.failedTasks = append(w.failedTasks, task)
 }
 
 func (w *watcher) checkTask(ctx context.Context, task Task) (string, error) {
-
 	seatInfos, err := w.r.GetSeats(ctx, task.stuID, task.roomID, task.startTime, task.endTime)
 	if err != nil {
 		return "", err
 	}
+
+	var availableSeats []string
 	for _, seatInfo := range seatInfos {
 		if seatInfo.IfAvailable() {
-			return seatInfo.DevID, nil
+			availableSeats = append(availableSeats, seatInfo.DevID)
 		}
 	}
 
-	return "", fmt.Errorf("task of %s is not available", task.stuID)
+	if len(availableSeats) == 0 {
+		return "", fmt.Errorf("task of %s is not available", task.stuID)
+	}
+
+	// 用当前时间戳秒对空闲座位数量取模，选一个随机座位
+	idx := int(time.Now().Unix()) % len(availableSeats)
+	return availableSeats[idx], nil
 }
+
 
 func CanQuerySeats(startTime time.Time) bool {
 	currentTime := GetCurrentShanghaiTime()
-
-	// 获取当前日期（今天）和明天，时间归零
 	today := time.Date(currentTime.Year(), currentTime.Month(), currentTime.Day(), 0, 0, 0, 0, currentTime.Location())
 	tomorrow := today.AddDate(0, 0, 1)
-
-	// 获取 startTime 的日期部分
 	startDate := time.Date(startTime.Year(), startTime.Month(), startTime.Day(), 0, 0, 0, 0, currentTime.Location())
 
 	if currentTime.Hour() < 18 {
@@ -223,81 +247,104 @@ func CanQuerySeats(startTime time.Time) bool {
 	}
 }
 
-func (w *watcher) pollingUndoTasks(ctx context.Context) <-chan Action {
-	pendingActions := make(chan Action, 10)
-
-	go func(ctx context.Context) {
-		ticker := time.NewTicker(5 * time.Second)
+func (w *watcher) pollingPendingTasks(ctx context.Context) <-chan Action {
+	actionsCh := make(chan Action, 10)
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
-
-		defer close(pendingActions)
+		defer close(actionsCh)
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				w.undoTaskMutex.RLock()
-				tasksSnapshot := append([]Task{}, w.undoTasks...) // 拷贝副本，避免锁长时间持有
-				w.undoTaskMutex.RUnlock()
+				// 拷贝当前 pending 任务快照
+				w.pendingMutex.RLock()
+				tasksSnapshot := make([]Task, 0, len(w.pendingTasks))
+				for _, t := range w.pendingTasks {
+					tasksSnapshot = append(tasksSnapshot, t)
+				}
+				w.pendingMutex.RUnlock()
 
-				var nextTasks []Task
 				for _, task := range tasksSnapshot {
-
-                    
-
 					if err := task.Check(); err != nil {
+						w.pendingMutex.Lock()
+						delete(w.pendingTasks, task.stuID)
+						w.pendingMutex.Unlock()
+						task.status = FAILED
 						w.addFailedTask(task)
 						continue
 					}
 
-                    nextTasks = append(nextTasks, task)
-                    
-                    if !CanQuerySeats(task.startTime) {
-                        continue
-                    }
-
-					seat, err := w.checkTask(ctx, task)
-					if err != nil {
-						fmt.Printf("error checking task %v: %v\n", task, err)
+					if !CanQuerySeats(task.startTime) {
 						continue
 					}
-					action := Action{
-						Task:   task,
-						seatID: seat,
+
+					seatID, err := w.checkTask(ctx, task)
+					if err != nil {
+						fmt.Printf("task check failed for %v: %v\n", task.stuID, err)
+						continue
 					}
-					pendingActions <- action
+
+					// 任务进入 running 状态，更新状态并移动任务
+					w.pendingMutex.Lock()
+					delete(w.pendingTasks, task.stuID)
+					w.pendingMutex.Unlock()
+
+					task.status = RUNNING
+
+					w.runningMutex.Lock()
+					w.runningTasks[task.stuID] = task
+					w.runningMutex.Unlock()
+
+					actionsCh <- Action{
+						Task:   task,
+						seatID: seatID,
+					}
 				}
-				w.undoTaskMutex.Lock()
-				w.undoTasks = nextTasks
-				w.undoTaskMutex.Unlock()
 			}
 		}
-	}(ctx)
-	return pendingActions
+	}()
+	return actionsCh
 }
 
 func (w *watcher) Watch(ctx context.Context) {
-
-	pendingActions := w.pollingUndoTasks(ctx)
+	actionsCh := w.pollingPendingTasks(ctx)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case action, ok := <-pendingActions:
+		case action, ok := <-actionsCh:
 			if !ok {
-				return // channel closed
+				return
 			}
 			err := w.r.Reverse(ctx, action.stuID, action.seatID, action.startTime, action.endTime)
 			if err == nil {
-                fmt.Printf("successfully reserved seat for %v, and seatID is %v", action.stuID,action.seatID)
+				fmt.Printf("successfully reserved seat for %v, seatID: %v\n", action.stuID, action.seatID)
 
-				removeErr := w.RemoveTask(ctx, action.stuID)
-				if removeErr != nil {
-					fmt.Printf("error removing task for %s: %v\n", action.stuID, removeErr)
-				} else {
-					w.addDoneTask(action)
+				// 移除 running 任务
+				w.runningMutex.Lock()
+				delete(w.runningTasks, action.stuID)
+				w.runningMutex.Unlock()
+
+				action.status = SUCCESS
+				w.addDoneTask(action)
+			} else {
+				fmt.Printf("reserve seat failed for %v: %v\n", action.stuID, err)
+
+				// 任务失败，移除 running 并加入失败队列，允许重试（这里可以加重试逻辑）
+				w.runningMutex.Lock()
+				task, exists := w.runningTasks[action.stuID]
+				if exists {
+					delete(w.runningTasks, action.stuID)
+				}
+				w.runningMutex.Unlock()
+
+				if exists {
+					task.status = FAILED
+					w.addFailedTask(task)
 				}
 			}
 		}
