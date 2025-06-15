@@ -80,13 +80,45 @@ func (app *App) setupRoutes() {
 	})
 
 	app.e.POST("/add_task", func(c *gin.Context) {
-		var task Task
-		if err := c.ShouldBindJSON(&task); err != nil {
+		type Req struct {
+			StuID     string `json:"stuID"`
+			StartTime string `json:"startTime"` // 接收字符串
+			EndTime   string `json:"endTime"`   // 接收字符串
+			RoomID    string `json:"roomID"`
+		}
+
+		var req Req
+		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(400, gin.H{"error": "Invalid task input"})
 			return
 		}
 
-		if err := app.w.AddTask(c, task); err != nil {
+		  // 解析时区
+        loc, err := time.LoadLocation("Asia/Shanghai")
+        if err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load timezone"})
+            return
+        }
+
+        // 解析时间字符串
+        startTime, err := time.ParseInLocation("2006-01-02 15:04", req.StartTime, loc)
+        if err != nil {
+            c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid startTime format"})
+            return
+        }
+
+        endTime, err := time.ParseInLocation("2006-01-02 15:04", req.EndTime, loc)
+        if err != nil {
+            c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid endTime format"})
+            return
+        }
+
+		if err := app.w.AddTask(c, Task{
+			stuID:     req.StuID,
+			startTime: startTime,
+			endTime:   endTime,
+			roomID:    req.RoomID,
+		}); err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}

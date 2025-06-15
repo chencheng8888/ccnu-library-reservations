@@ -36,6 +36,10 @@ func (t *Task) Check() error {
 		return fmt.Errorf("invalid task: end time is before start time")
 	}
 
+	// 自动向上对齐到下一个5分钟点
+	t.startTime = RoundUpToNext5Min(t.startTime)
+	t.endTime = RoundUpToNext5Min(t.endTime)
+
 	// 限定可用时间段
 	weekday := t.startTime.Weekday()
 	isFriday := weekday == time.Friday
@@ -61,6 +65,7 @@ func (t *Task) Check() error {
 
 	return nil
 }
+
 
 type Action struct {
 	Task
@@ -265,6 +270,8 @@ func (w *watcher) Watch(ctx context.Context) {
 			}
 			err := w.r.Reverse(ctx, action.stuID, action.seatID, action.startTime, action.endTime)
 			if err == nil {
+                fmt.Printf("successfully reserved seat for %s, and seatID is %d", action.stuID,action.seatID)
+
 				removeErr := w.RemoveTask(ctx, action.stuID)
 				if removeErr != nil {
 					fmt.Printf("error removing task for %s: %v\n", action.stuID, removeErr)

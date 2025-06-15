@@ -139,6 +139,8 @@ func (r *reverser) GetSeats(ctx context.Context,stuID, roomID string, startTime 
 		return nil, fmt.Errorf("failed to get available seats: %s", getSeatResp.Msg)
 	}
 
+	fmt.Println("Get available seats successfully,number of seats:", len(getSeatResp.Data))
+
 	return getSeatResp.Data, nil
 }
 
