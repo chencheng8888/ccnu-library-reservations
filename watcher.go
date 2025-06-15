@@ -24,14 +24,14 @@ type Task struct {
 	status    string
 }
 
-func NewTask(stuID,roomID string,startTime,endTime time.Time) Task {
-    return Task{
-        stuID:     stuID,
-        roomID:    roomID,
-        startTime: RoundUpToNext5Min(startTime),
-        endTime:   RoundUpToNext5Min(endTime),
-        status:   PENDING,
-    }
+func NewTask(stuID, roomID string, startTime, endTime time.Time) Task {
+	return Task{
+		stuID:     stuID,
+		roomID:    roomID,
+		startTime: RoundUpToNext5Min(startTime),
+		endTime:   RoundUpToNext5Min(endTime),
+		status:    PENDING,
+	}
 }
 
 func (t *Task) Check() error {
@@ -95,12 +95,12 @@ type watcher struct {
 	a Auther
 	r Reverser
 
-	userMap map[string]struct{}
+	userMap      map[string]struct{}
 	userMapMutex sync.RWMutex
 
 	// 任务分状态存储
-	pendingTasks map[string]Task       // stuID -> Task
-	runningTasks map[string]Task       // stuID -> Task
+	pendingTasks map[string]Task // stuID -> Task
+	runningTasks map[string]Task // stuID -> Task
 	doneTasks    []Action
 	failedTasks  []Task
 
@@ -234,7 +234,6 @@ func (w *watcher) checkTask(ctx context.Context, task Task) (string, error) {
 	return availableSeats[idx], nil
 }
 
-
 func CanQuerySeats(startTime time.Time) bool {
 	currentTime := GetCurrentShanghaiTime()
 	today := time.Date(currentTime.Year(), currentTime.Month(), currentTime.Day(), 0, 0, 0, 0, currentTime.Location())
@@ -348,8 +347,8 @@ func (w *watcher) Watch(ctx context.Context) {
 					w.addFailedTask(task)
 				}
 			}
-        case <-time.After(24 * time.Hour):
-            
+		case <-time.After(24 * time.Hour):
+
 		}
 	}
 }
@@ -370,7 +369,7 @@ func (w *watcher) writeToLog() error {
 	w.failedMutex.Unlock()
 
 	// 写入 done_tasks.log
-	doneFile, err := os.OpenFile("done_tasks.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	doneFile, err := os.OpenFile("logs/done_tasks.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open done_tasks.log: %w", err)
 	}
@@ -391,7 +390,7 @@ func (w *watcher) writeToLog() error {
 	}
 
 	// 写入 failed_tasks.log
-	failedFile, err := os.OpenFile("failed_tasks.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	failedFile, err := os.OpenFile("logs/failed_tasks.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open failed_tasks.log: %w", err)
 	}

@@ -21,8 +21,9 @@ COPY --from=builder /app/library-reservations .
 # 设置容器默认时区
 ENV TZ=Asia/Shanghai
 
+RUN mkdir "logs"
 # 可选：预创建日志文件
-RUN touch done_tasks.log failed_tasks.log
+RUN touch logs/done_tasks.log logs/failed_tasks.log
 
 EXPOSE 15147
-CMD ["./library-reservations"]
+CMD ["/app/library-reservations"]

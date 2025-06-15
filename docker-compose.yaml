@@ -11,5 +11,5 @@ services:
     environment:
       - TZ=Asia/Shanghai
     volumes:
-      - ./logs:/app      # 将日志挂载到宿主机 ./logs 目录，便于查看 done_tasks.log 和 failed_tasks.log
+      - ./logs:/app/logs      # 将日志挂载到宿主机 ./logs 目录，便于查看 done_tasks.log 和 failed_tasks.log
     restart: "always"  # 容器崩溃后自动重启
