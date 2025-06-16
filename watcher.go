@@ -348,7 +348,12 @@ func (w *watcher) Watch(ctx context.Context) {
 				}
 			}
 		case <-time.After(24 * time.Hour):
-
+			// 每天定时写入日志
+			if err := w.writeToLog(); err != nil {
+				fmt.Printf("failed to write logs: %v\n", err)
+			} else {
+				fmt.Println("logs written successfully")
+			}
 		}
 	}
 }
