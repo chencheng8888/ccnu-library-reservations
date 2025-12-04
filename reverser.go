@@ -23,14 +23,14 @@ type reverser struct {
 	au  Auther
 }
 
-func NewReverser(auther Auther) Reverser {
+func NewReverser(au Auther) Reverser {
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	client := &http.Client{Transport: tr}
 	return &reverser{
 		cli: client,
-		au:  auther,
+		au:  au,
 	}
 }
 
