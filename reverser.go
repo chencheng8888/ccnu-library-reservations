@@ -19,8 +19,8 @@ type Reverser interface {
 }
 
 type reverser struct {
-	cli    *http.Client
-	auther Auther
+	cli *http.Client
+	au  Auther
 }
 
 func NewReverser(auther Auther) Reverser {
@@ -29,8 +29,8 @@ func NewReverser(auther Auther) Reverser {
 	}
 	client := &http.Client{Transport: tr}
 	return &reverser{
-		cli:    client,
-		auther: auther,
+		cli: client,
+		au:  auther,
 	}
 }
 
@@ -45,7 +45,7 @@ type ReverseResponse struct {
 // 预约座位
 func (r *reverser) Reverse(ctx context.Context, stuID, seatID string, startTime time.Time, endTime time.Time) error {
 
-	cookie, err := r.auther.GetCookie(ctx, stuID)
+	cookie, err := r.au.GetCookie(ctx, stuID)
 	if err != nil {
 		return fmt.Errorf("failed to get cookie: %w", err)
 	}
@@ -113,7 +113,7 @@ func (r *reverser) GetSeatsByTime(ctx context.Context, stuID, roomID string, sta
 }
 
 func (r *reverser) getSeats(ctx context.Context, stuID, roomID string, startTime time.Time, endTime time.Time) ([]crawSeatInfo, error) {
-	cookie, err := r.auther.GetCookie(ctx, stuID)
+	cookie, err := r.au.GetCookie(ctx, stuID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get cookie: %w", err)
 	}

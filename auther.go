@@ -55,7 +55,7 @@ func (a *auther) StoreStuInfo(ctx context.Context, stuID string, pwd string) err
 	return nil
 }
 
-//func (a *auther) GetStuIDs(ctx context.Context) []string {
+//func (a *au) GetStuIDs(ctx context.Context) []string {
 //	a.infoMutex.RLock()
 //	defer a.infoMutex.RUnlock()
 //
