@@ -1,4 +1,4 @@
-package reverser
+package library_reservation
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"libary-reservations/internal/auther"
 	"libary-reservations/pkg"
 	"net/http"
 	"net/url"
@@ -21,10 +20,10 @@ type Reverser interface {
 
 type reverser struct {
 	cli    *http.Client
-	auther auther.Auther
+	auther Auther
 }
 
-func NewReverser(auther auther.Auther) Reverser {
+func NewReverser(auther Auther) Reverser {
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
@@ -90,7 +89,13 @@ func (r *reverser) Reverse(ctx context.Context, stuID, seatID string, startTime 
 }
 
 func (r *reverser) GetSeatsByTime(ctx context.Context, stuID, roomID string, startTime time.Time, endTime time.Time, onlyAvailable bool) ([]Seat, error) {
-	seats, err := r.getSeats(ctx, stuID, roomID, startTime, endTime)
+	cseats, err := r.getSeats(ctx, stuID, roomID, startTime, endTime)
+	if err != nil {
+		return nil, err
+	}
+
+	seats := transferCrawSeat(cseats, startTime, endTime)
+
 	if !onlyAvailable {
 		return seats, err
 	}
@@ -107,7 +112,7 @@ func (r *reverser) GetSeatsByTime(ctx context.Context, stuID, roomID string, sta
 	return availableSeats, nil
 }
 
-func (r *reverser) getSeats(ctx context.Context, stuID, roomID string, startTime time.Time, endTime time.Time) ([]Seat, error) {
+func (r *reverser) getSeats(ctx context.Context, stuID, roomID string, startTime time.Time, endTime time.Time) ([]crawSeatInfo, error) {
 	cookie, err := r.auther.GetCookie(ctx, stuID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get cookie: %w", err)
@@ -148,9 +153,7 @@ func (r *reverser) getSeats(ctx context.Context, stuID, roomID string, startTime
 
 	fmt.Println("Get available seats successfully,number of seats:", len(getSeatResp.Data))
 
-	seats := transferCrawSeat(getSeatResp.Data, startTime, endTime)
-
-	return seats, nil
+	return getSeatResp.Data, nil
 }
 
 type getSeatResp struct {
@@ -253,8 +256,11 @@ func transferCrawSeat(infos []crawSeatInfo, reserveStartTime, reserveEndTime tim
 				continue
 			}
 
-			occupyStates = append(occupyStates, period{StartTime: pkg.MaxTime(startTime, reserveStartTime),
-				EndTime: pkg.MinTime(endTime, reserveEndTime)})
+			occupyStates = append(occupyStates, period{
+				Owner:     t.Owner,
+				StartTime: pkg.MaxTime(startTime, reserveStartTime),
+				EndTime:   pkg.MinTime(endTime, reserveEndTime),
+			})
 		}
 
 		// 对占用状态进行排序
@@ -275,6 +281,7 @@ func transferCrawSeat(infos []crawSeatInfo, reserveStartTime, reserveEndTime tim
 }
 
 type period struct {
+	Owner     string
 	StartTime time.Time
 	EndTime   time.Time
 }

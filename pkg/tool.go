@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	rooms = map[string]string{
+	Rooms = map[string]string{
 		"n1":  "101699179", //南湖分馆一楼开敞座位区
 		"n1m": "101699187", //南湖分馆一楼中庭开敞座位区
 		"n2":  "101699189", //南湖分馆二楼开敞座位区
@@ -14,14 +14,14 @@ var (
 )
 
 func TransformRoomNameToID(roomName string) string {
-	if id, exists := rooms[roomName]; exists {
+	if id, exists := Rooms[roomName]; exists {
 		return id
 	}
 	return ""
 }
 
 func CheckRoomID(roomID string) bool {
-	for _, id := range rooms {
+	for _, id := range Rooms {
 		if id == roomID {
 			return true
 		}

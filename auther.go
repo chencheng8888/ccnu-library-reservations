@@ -1,4 +1,4 @@
-package auther
+package library_reservation
 
 import (
 	"context"
