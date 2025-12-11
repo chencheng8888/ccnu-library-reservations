@@ -1,4 +1,4 @@
-module github.com/chencheng8888/libary_reservations
+module github.com/chencheng8888/ccnu-library-reservations
 
 go 1.24.2
 

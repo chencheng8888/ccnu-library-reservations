@@ -4,7 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/chencheng8888/libary_reservations"
+	libraryreservation "github.com/chencheng8888/ccnu-library-reservations"
 	"math/rand"
 	"time"
 )
@@ -24,8 +24,8 @@ func main() {
 	flag.Parse()
 
 	ctx := context.Background()
-	auth := library_reservation.NewAuther()
-	r := library_reservation.NewReverser(auth)
+	auth := libraryreservation.NewAuther()
+	r := libraryreservation.NewReverser(auth)
 
 	err := auth.StoreStuInfo(ctx, stuId, password)
 	if err != nil {
@@ -58,7 +58,7 @@ func main() {
 		tomorrow.Location(),
 	)
 
-	seats, err := r.GetSeatsByTime(ctx, stuId, library_reservation.Rooms["n1m"], tomorrow14, tomorrow21, true)
+	seats, err := r.GetSeatsByTime(ctx, stuId, libraryreservation.Rooms["n1m"], tomorrow14, tomorrow21, true)
 	if err != nil {
 		panic(err)
 	}
