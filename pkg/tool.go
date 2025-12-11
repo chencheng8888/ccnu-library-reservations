@@ -5,30 +5,6 @@ import (
 	"time"
 )
 
-var (
-	Rooms = map[string]string{
-		"n1":  "101699179", //南湖分馆一楼开敞座位区
-		"n1m": "101699187", //南湖分馆一楼中庭开敞座位区
-		"n2":  "101699189", //南湖分馆二楼开敞座位区
-	}
-)
-
-func TransformRoomNameToID(roomName string) string {
-	if id, exists := Rooms[roomName]; exists {
-		return id
-	}
-	return ""
-}
-
-func CheckRoomID(roomID string) bool {
-	for _, id := range Rooms {
-		if id == roomID {
-			return true
-		}
-	}
-	return false
-}
-
 func CreateShanghaiTime(year int, month int, day, hour, min int) time.Time {
 	loc, _ := time.LoadLocation("Asia/Shanghai")
 	return time.Date(year, time.Month(month), day, hour, min, 0, 0, loc)

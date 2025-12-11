@@ -42,7 +42,7 @@ type ReverseResponse struct {
 	Ext  interface{} `json:"ext"`
 }
 
-// 预约座位
+// Reverse 预约座位
 func (r *reverser) Reverse(ctx context.Context, stuID, seatID string, startTime time.Time, endTime time.Time) error {
 
 	cookie, err := r.au.GetCookie(ctx, stuID)
@@ -244,7 +244,7 @@ func transferCrawSeat(infos []crawSeatInfo, reserveStartTime, reserveEndTime tim
 	seats := make([]Seat, 0, len(infos))
 
 	for _, info := range infos {
-		var occupyStates []period
+		var occupyStates []Period
 		for _, t := range info.Ts {
 			startTime, _ := pkg.TransferStringToTime(t.Start, pkg.FORMAT2)
 			endTime, _ := pkg.TransferStringToTime(t.End, pkg.FORMAT2)
@@ -256,7 +256,7 @@ func transferCrawSeat(infos []crawSeatInfo, reserveStartTime, reserveEndTime tim
 				continue
 			}
 
-			occupyStates = append(occupyStates, period{
+			occupyStates = append(occupyStates, Period{
 				Owner:     t.Owner,
 				StartTime: pkg.MaxTime(startTime, reserveStartTime),
 				EndTime:   pkg.MinTime(endTime, reserveEndTime),
@@ -273,112 +273,9 @@ func transferCrawSeat(infos []crawSeatInfo, reserveStartTime, reserveEndTime tim
 
 		roomID := fmt.Sprintf("%d", info.RoomID)
 
-		seat := newSeat(info.DevID, info.DevName, roomID, info.RoomName, reserveStartTime,
+		seat := NewSeat(info.DevID, info.DevName, roomID, info.RoomName, reserveStartTime,
 			reserveEndTime, info.FreeSta == 0, occupyStates)
 		seats = append(seats, seat)
 	}
 	return seats
-}
-
-type period struct {
-	Owner     string
-	StartTime time.Time
-	EndTime   time.Time
-}
-
-type Seat struct {
-	seatID   string //座位ID
-	seatName string //座位名称
-	roomID   string //区域ID
-	roomName string //区域名称
-	//这个要保证有序
-	//且保证范围在预定时间段内
-	occupyStates     []period  // 占用状态
-	reserveStartTime time.Time // 预定的开始时间
-	reserveEndTime   time.Time // 预定的结束时间
-	isFree           bool      //在预定时间段内是否空闲
-}
-
-func newSeat(seatID, seatName, roomID, roomName string, reserveStartTime, reserveEndTime time.Time, isFree bool, occ []period) Seat {
-	return Seat{
-		seatID:           seatID,
-		seatName:         seatName,
-		roomID:           roomID,
-		roomName:         roomName,
-		reserveStartTime: reserveStartTime,
-		reserveEndTime:   reserveEndTime,
-		isFree:           isFree,
-		occupyStates:     occ,
-	}
-}
-
-func (s *Seat) GetSeatID() string {
-	return s.seatID
-}
-func (s *Seat) GetSeatName() string {
-	return s.seatName
-}
-func (s *Seat) GetRoomID() string {
-	return s.roomID
-}
-func (s *Seat) GetRoomName() string {
-	return s.roomName
-}
-
-// IsFree 判断在预定时间段内是否空闲，如果是空闲的，则返回true
-// 否则返回false，并返回空闲的时间段
-func (s *Seat) IsFree(startTime, endTime time.Time) (bool, []period) {
-	// 限定范围在可预约时间内
-	if startTime.Before(s.reserveStartTime) {
-		startTime = s.reserveStartTime
-	}
-	if endTime.After(s.reserveEndTime) {
-		endTime = s.reserveEndTime
-	}
-	if !startTime.Before(endTime) {
-		return false, nil
-	}
-
-	if s.isFree {
-		// 如果当前座位在预定时间段内是空闲的，则直接返回整个预定时间段
-		return true, []period{{StartTime: startTime, EndTime: endTime}}
-	}
-
-	var freePeriods []period
-	curr := startTime
-
-	for _, occ := range s.occupyStates {
-		// 若当前占用段完全在查询段之后，跳过后续
-		if occ.StartTime.After(endTime) {
-			break
-		}
-
-		// 若当前空闲段在占用段前，且有重叠空间，则加入一个空闲段
-		if curr.Before(occ.StartTime) {
-			// 取空闲段范围：[curr, min(occ.StartTime, endTime)]
-			freeEnd := occ.StartTime
-			if freeEnd.After(endTime) {
-				freeEnd = endTime
-			}
-			if curr.Before(freeEnd) {
-				freePeriods = append(freePeriods, period{StartTime: curr, EndTime: freeEnd})
-			}
-		}
-
-		// 将 curr 推进到占用段之后
-		if occ.EndTime.After(curr) {
-			curr = occ.EndTime
-		}
-	}
-
-	// 最后一段空闲（在最后一个占用段之后）
-	if curr.Before(endTime) {
-		freePeriods = append(freePeriods, period{StartTime: curr, EndTime: endTime})
-	}
-
-	return false, freePeriods
-}
-
-func transferTimeToInt(t time.Time) int {
-	return t.Hour()*100 + t.Minute()
 }
