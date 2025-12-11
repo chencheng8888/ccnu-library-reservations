@@ -1,4 +1,4 @@
-module github.com/chencheng8888/libary-reservations
+module github.com/chencheng8888/libary_reservations
 
 go 1.24.2
 

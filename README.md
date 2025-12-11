@@ -17,7 +17,7 @@
 
 ## 引用
 ```bash
-go get github.com/chencheng8888/libary-reservations
+go get github.com/chencheng8888/libary_reservations
 ```
 
 ## 快速开始
@@ -33,7 +33,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/chencheng8888/libary-reservations"
+	"github.com/chencheng8888/libary_reservations"
 	"math/rand"
 	"time"
 )
@@ -44,24 +44,23 @@ var (
 )
 
 func init() {
-	flag.StringVar(&stuId, "stuId", "your_stuId", "学号")
-	flag.StringVar(&password, "password", "your_password", "密码")
+	flag.StringVar(&stuId, "stuId", "your_stuId", "stuId")
+	flag.StringVar(&password, "password", "your_password", "password")
 }
 
 func main() {
+
 	flag.Parse()
 
 	ctx := context.Background()
 	auth := library_reservation.NewAuther()
 	r := library_reservation.NewReverser(auth)
 
-	// 存储用户信息
 	err := auth.StoreStuInfo(ctx, stuId, password)
 	if err != nil {
 		panic(err)
 	}
 
-	// 设置时区
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
 		panic(err)
@@ -88,34 +87,31 @@ func main() {
 		tomorrow.Location(),
 	)
 
-	// 查询可用座位
 	seats, err := r.GetSeatsByTime(ctx, stuId, library_reservation.Rooms["n1m"], tomorrow14, tomorrow21, true)
 	if err != nil {
 		panic(err)
 	}
 
 	if len(seats) == 0 {
-		panic("未找到可用座位")
+		panic("no available seats found")
 	}
 
-	fmt.Println("可用座位数量:", len(seats))
+	fmt.Println("Available seats cnt:", len(seats))
 
-	// 设置随机种子
+	// 先用当前时间设置随机种子，避免每次运行结果相同
 	rand.Seed(time.Now().UnixNano())
 
-	// 随机选择一个座位
+	// 随机选择索引
 	idx := rand.Intn(len(seats))
 
-	fmt.Printf("选择的座位: %+v\n", seats[idx])
+	fmt.Printf("Seat: %+v\n", seats[idx])
 
-	// 预约座位
 	err = r.Reverse(ctx, stuId, seats[idx].SeatID, tomorrow14, tomorrow21)
 	if err != nil {
 		panic(err)
 	}
-
-	fmt.Println("预约成功!")
 }
+
 ```
 
 ### 运行示例

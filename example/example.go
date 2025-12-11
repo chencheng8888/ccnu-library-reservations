@@ -4,7 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/chencheng8888/libary-reservations"
+	"github.com/chencheng8888/libary_reservations"
 	"math/rand"
 	"time"
 )
