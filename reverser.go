@@ -5,12 +5,13 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"github.com/chencheng8888/ccnu-library-reservations/pkg"
 	"io"
 	"net/http"
 	"net/url"
 	"sort"
 	"time"
+
+	"github.com/chencheng8888/ccnu-library-reservations/pkg"
 )
 
 type Reverser interface {
@@ -96,7 +97,7 @@ func (r *reverser) GetSeatsByTime(ctx context.Context, stuID, roomID string, sta
 
 	seats := transferCrawSeat(cseats, startTime, endTime)
 
-	if !onlyAvailable {
+	if !onlyAvailable || len(seats) == 0 {
 		return seats, err
 	}
 
@@ -241,6 +242,10 @@ type crawSeatInfo struct {
 }
 
 func transferCrawSeat(infos []crawSeatInfo, reserveStartTime, reserveEndTime time.Time) []Seat {
+	if len(infos) ==0 {
+		return nil
+	}
+	
 	seats := make([]Seat, 0, len(infos))
 
 	for _, info := range infos {
