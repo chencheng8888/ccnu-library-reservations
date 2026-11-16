@@ -1,95 +1,72 @@
 package library_reservation
 
 import (
-	"time"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"sort"
 )
 
-type Period struct {
-	Owner     string
-	StartTime time.Time
-	EndTime   time.Time
-}
-
+// Seat is a single reservable place within a Space.
 type Seat struct {
-	SeatID   string //座位ID
-	SeatName string //座位名称
-	RoomID   string //区域ID
-	RoomName string //区域名称
-	//这个要保证有序
-	//且保证范围在预定时间段内
-	OccupyStates      []Period  // 占用状态
-	ReserveStartTime  time.Time // 预定的开始时间
-	ReserveEndTime    time.Time // 预定的结束时间
-	isFreeInTimeRange bool      //在预定时间段内是否空闲
+	ID      string
+	Label   string // Short label shown in the Space layout.
+	Name    string // Upstream display name, when provided.
+	SpaceID string
 }
 
-func NewSeat(seatID, seatName, roomID, roomName string, reserveStartTime, reserveEndTime time.Time, isFree bool, occ []Period) Seat {
-	return Seat{
-		SeatID:            seatID,
-		SeatName:          seatName,
-		RoomID:            roomID,
-		RoomName:          roomName,
-		ReserveStartTime:  reserveStartTime,
-		ReserveEndTime:    reserveEndTime,
-		isFreeInTimeRange: isFree,
-		OccupyStates:      occ,
-	}
+// FreeSeat is a Seat that is free for the entire requested Window.
+type FreeSeat struct {
+	Seat
 }
 
-// IsFree 判断在预定时间段内是否空闲，如果是空闲的，则返回true
-// 否则返回false，并返回空闲的时间段
-func (s *Seat) IsFree(startTime, endTime time.Time) (bool, []Period) {
-	// 限定范围在可预约时间内
-	if startTime.Before(s.ReserveStartTime) {
-		startTime = s.ReserveStartTime
-	}
-	if endTime.After(s.ReserveEndTime) {
-		endTime = s.ReserveEndTime
-	}
-	if !startTime.Before(endTime) {
-		return false, nil
-	}
-
-	if s.isFreeInTimeRange {
-		// 如果当前座位在预定时间段内是空闲的，则直接返回整个预定时间段
-		return true, []Period{{StartTime: startTime, EndTime: endTime}}
-	}
-
-	var freePeriods []Period
-	curr := startTime
-
-	for _, occ := range s.OccupyStates {
-		// 若当前占用段完全在查询段之后，跳过后续
-		if occ.StartTime.After(endTime) {
-			break
-		}
-
-		// 若当前空闲段在占用段前，且有重叠空间，则加入一个空闲段
-		if curr.Before(occ.StartTime) {
-			// 取空闲段范围：[curr, min(occ.StartTime, endTime)]
-			freeEnd := occ.StartTime
-			if freeEnd.After(endTime) {
-				freeEnd = endTime
-			}
-			if curr.Before(freeEnd) {
-				freePeriods = append(freePeriods, Period{StartTime: curr, EndTime: freeEnd})
-			}
-		}
-
-		// 将 curr 推进到占用段之后
-		if occ.EndTime.After(curr) {
-			curr = occ.EndTime
-		}
-	}
-
-	// 最后一段空闲（在最后一个占用段之后）
-	if curr.Before(endTime) {
-		freePeriods = append(freePeriods, Period{StartTime: curr, EndTime: endTime})
-	}
-
-	return false, freePeriods
+type freeSeatItem struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
 }
 
-func transferTimeToInt(t time.Time) int {
-	return t.Hour()*100 + t.Minute()
+func (r *reserver) ListFreeSeats(ctx context.Context, stuID, spaceID string, window Window) ([]FreeSeat, error) {
+	if spaceID == "" {
+		return nil, fmt.Errorf("list free seats: space ID is required")
+	}
+	body := map[string]any{
+		"beginMinute": window.StartMinute,
+		"endMinute":   window.EndMinute,
+		"minMinute":   0,
+	}
+	path := fmt.Sprintf("/static/frontApi/res/freeSeatIdsDuration/%s/%s",
+		url.PathEscape(spaceID), window.dateString())
+
+	var raw json.RawMessage
+	if err := r.postAuthenticated(ctx, stuID, path, body, &raw); err != nil {
+		return nil, fmt.Errorf("list free seats: %w", err)
+	}
+	if len(raw) == 0 || string(raw) == "null" || string(raw) == `""` {
+		return []FreeSeat{}, nil
+	}
+
+	var items map[string]freeSeatItem
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, fmt.Errorf("list free seats: decode seats: %w", err)
+	}
+
+	seats := make([]FreeSeat, 0, len(items))
+	for _, item := range items {
+		seats = append(seats, FreeSeat{Seat: Seat{
+			ID:      item.ID,
+			Label:   item.Label,
+			Name:    item.Name,
+			SpaceID: spaceID,
+		}})
+	}
+	sort.Slice(seats, func(i, j int) bool {
+		if seats[i].Label == seats[j].Label {
+			return seats[i].ID < seats[j].ID
+		}
+		return seats[i].Label < seats[j].Label
+	})
+	return seats, nil
 }

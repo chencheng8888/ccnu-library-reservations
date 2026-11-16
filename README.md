@@ -1,269 +1,199 @@
-# CCNU 图书馆座位预约系统
+# CCNU 图书馆座位预约
 
-一个用于华中师范大学图书馆座位预约的 Go 语言库，提供自动化预约、座位查询和用户认证功能。
+华中师范大学图书馆座位预约系统的 Go 客户端，覆盖登录认证、馆舍/楼层/空间发现、空闲座位查询和预约。
 
-## 主要功能
-- [x] 添加用户(添加学号和密码)
-- [x] 查看座位
+客户端对接新版预约系统（`https://kjyy.ccnu.edu.cn/rem` + `https://kjyy.ccnu.edu.cn/jsq`），不复用旧版 HTTP 接口。
+
+## 功能
+
+- [x] 使用学号密码登录（CAS → Handoff Token → Session Token）
+- [x] 查询馆舍、楼层和可选日期
+- [x] 按 Reservation Window 查询 Space 的空闲座位数
+- [x] 查询整个 Reservation Window 内空闲的 Free Seats
 - [x] 预约座位
+- [x] 取消预约
 
-## 使用
+## 安装
 
-### 前提条件
-
--   Go 1.24.2 或更高版本
-
-### 安装步骤
-
-## 引用
 ```bash
 go get github.com/chencheng8888/ccnu-library-reservations
 ```
 
+需要 Go 1.24 或更高版本。
+
 ## 快速开始
-
-### 基本使用示例
-
-参考 `example/example.go` 文件：
 
 ```go
 package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
-	libraryreservation "github.com/chencheng8888/ccnu-library-reservations"
-	"math/rand"
+	"log"
 	"time"
-)
 
-var (
-	stuId    string
-	password string
+	library "github.com/chencheng8888/ccnu-library-reservations"
 )
-
-func init() {
-	flag.StringVar(&stuId, "stuId", "your_stuId", "stuId")
-	flag.StringVar(&password, "password", "your_password", "password")
-}
 
 func main() {
-
-	flag.Parse()
-
 	ctx := context.Background()
-	auth := libraryreservation.NewAuther()
-	r := libraryreservation.NewReverser(auth)
+	stuID, password := "你的学号", "你的密码"
 
-	err := auth.StoreStuInfo(ctx, stuId, password)
+	auth := library.NewAuthenticator()
+	if err := auth.StoreStuInfo(ctx, stuID, password); err != nil {
+		log.Fatal(err)
+	}
+	reserver := library.NewReserver(auth)
+
+	// 1. 查询馆舍、楼层和可选日期
+	catalog, err := reserver.Catalog(ctx, stuID)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
+	}
+	for _, building := range catalog.Buildings {
+		fmt.Println(building.Name)
+		for _, floor := range building.Floors {
+			fmt.Println("  -", floor.Name, floor.ID)
+		}
 	}
 
-	loc, err := time.LoadLocation("Asia/Shanghai")
+	// 2. 构造明天的 Reservation Window
+	loc, _ := time.LoadLocation("Asia/Shanghai")
+	day := time.Now().In(loc).AddDate(0, 0, 1)
+	start := time.Date(day.Year(), day.Month(), day.Day(), 12, 30, 0, 0, loc)
+	end := time.Date(day.Year(), day.Month(), day.Day(), 21, 30, 0, 0, loc)
+	window, err := library.NewWindow(start, end)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
-	now := time.Now().In(loc)
-	tomorrow := now.AddDate(0, 0, 1)
-
-	// 创建明天 12:30 的时间
-	tomorrow14 := time.Date(
-		tomorrow.Year(),
-		tomorrow.Month(),
-		tomorrow.Day(),
-		12, 30, 0, 0,
-		tomorrow.Location(),
-	)
-
-	// 创建明天 21:30 的时间
-	tomorrow21 := time.Date(
-		tomorrow.Year(),
-		tomorrow.Month(),
-		tomorrow.Day(),
-		21, 30, 0, 0,
-		tomorrow.Location(),
-	)
-
-	seats, err := r.GetSeatsByTime(ctx, stuId, libraryreservation.Rooms["n1m"], tomorrow14, tomorrow21, true)
+	// 3. 查看楼层内各 Space 的空闲座位数
+	space := library.Spaces["n1m"]
+	spaces, err := reserver.ListSpaces(ctx, stuID, space.BuildingID, space.FloorID, window)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
+	}
+	for _, item := range spaces {
+		fmt.Printf("%s: %d/%d free\n", item.Name, item.SeatFree, item.SeatTotal)
 	}
 
+	// 4. 查询 Free Seats
+	seats, err := reserver.ListFreeSeats(ctx, stuID, space.ID, window)
+	if err != nil {
+		log.Fatal(err)
+	}
 	if len(seats) == 0 {
-		panic("no available seats found")
+		log.Fatal("no Free Seats for the window")
 	}
 
-	fmt.Println("Available seats cnt:", len(seats))
-
-	// 先用当前时间设置随机种子，避免每次运行结果相同
-	rand.Seed(time.Now().UnixNano())
-
-	// 随机选择索引
-	idx := rand.Intn(len(seats))
-
-	fmt.Printf("Seat: %+v\n", seats[idx])
-
-	err = r.Reverse(ctx, stuId, seats[idx].SeatID, tomorrow14, tomorrow21)
-	if err != nil {
-		panic(err)
-	}
+	// 5. 预约（会真实下单；确认座位后再取消注释）
+	// reservation, err := reserver.Reserve(ctx, stuID, seats[0].ID, window)
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+	// fmt.Println("Reservation ID:", reservation.ID)
 }
-
 ```
 
-### 运行示例
+完整示例见 [`example/example.go`](example/example.go)：
 
 ```bash
 go run example/example.go -stuId=你的学号 -password=你的密码
 ```
 
-## API 文档
+默认是只读演练；加上 `-reserve` 才会真实创建预约。
 
-### 核心接口
+## 核心接口
 
-#### Auther 接口
+### Authenticator
 
 ```go
-type Auther interface {
-    StoreStuInfo(ctx context.Context, stuID, pwd string) error
-    GetCookie(ctx context.Context, stuID string) (string, error)
+type Authenticator interface {
+	StoreStuInfo(ctx context.Context, stuID, pwd string) error
+	SessionToken(ctx context.Context, stuID string) (string, error)
 }
 ```
 
-#### Reverser 接口
+`StoreStuInfo` 只保存凭据。首次调用 `SessionToken` 时才执行完整的登录流程，之后的调用复用 Session Token；过期后自动重新登录。
+
+### Reserver
 
 ```go
-type Reverser interface {
-    GetSeatsByTime(ctx context.Context, stuID, roomID string, startTime, endTime time.Time, onlyAvailable bool) ([]Seat, error)
-    Reverse(ctx context.Context, stuID, seatID string, startTime, endTime time.Time) error
+type Reserver interface {
+	Catalog(ctx context.Context, stuID string) (Catalog, error)
+	ListSpaces(ctx context.Context, stuID, buildingID, floorID string, window Window) ([]SpaceAvailability, error)
+	ListFreeSeats(ctx context.Context, stuID, spaceID string, window Window) ([]FreeSeat, error)
+	Reserve(ctx context.Context, stuID, seatID string, window Window) (Reservation, error)
+	Cancel(ctx context.Context, stuID, reservationID string) error
 }
 ```
 
+## 领域模型
 
+术语的完整定义见 [`GLOSSARY.md`](GLOSSARY.md)。
 
-### 数据结构
+| 类型 | 含义 |
+| --- | --- |
+| `Catalog` | 学生可用的 Building、Floor 和日期 |
+| `Building` / `Floor` | 馆舍及其楼层 |
+| `Space` | 楼层内可预约的区域，包含若干 Seat |
+| `Seat` | 一个可预约的座位 |
+| `FreeSeat` | 在整个 Reservation Window 内都空闲的 Seat |
+| `Window` | 日期 + 当天分钟数区间，由 `NewWindow` 构造 |
+| `Reservation` | 学生对某个 Seat 在某个 Window 内的占用 |
 
-#### Seat 结构
+### Space Code
 
-```go
-type Seat struct {
-    SeatID            string    // 座位ID
-    SeatName          string    // 座位名称
-    RoomID            string    // 区域ID
-    RoomName          string    // 区域名称
-    OccupyStates      []Period  // 占用状态
-    ReserveStartTime  time.Time // 预定的开始时间
-    ReserveEndTime    time.Time // 预定的结束时间
-    isFreeInTimeRange bool      // 在预定时间段内是否空闲
-}
+`Spaces` 是常用 Space 的静态别名表，方便从旧代码迁移；运行时以 `Catalog` / `ListSpaces` 的发现结果为准。
+
+| Space Code | Space ID | 名称 |
+| --- | --- | --- |
+| `n1` | `1995338268580167680` | 南湖分馆一楼开敞座位区 |
+| `n1m` | `1995338594917990400` | 南湖分馆一楼中庭开敞座位区 |
+| `n2` | `1995338850321743872` | 南湖分馆二楼开敞座位区 |
+
+## 预约规则
+
+`Reserve` 会先从系统配置读取 Step（最小时间粒度）和 Max Duration（单次最长时长），并校验 Reservation Window：
+
+- 日期必须存在，起止分钟必须在同一天内；
+- 开始必须早于结束；
+- 起止分钟必须对齐到 Step；
+- 时长不得超过 Max Duration。
+
+非法窗口返回可识别的 `ErrInvalidWindow`。上游拒绝的请求返回 `*APIError`，Session 过期返回 `ErrSessionExpired` 并自动重试一次。
+
+## 测试
+
+单元测试不访问网络。集成测试从仓库根目录的 `.env` 读取凭据，缺少配置时自动跳过：
+
+```bash
+cat > .env <<'EOF'
+STUID=你的学号
+PASSWORD=你的密码
+EOF
+go test ./...
 ```
 
-#### Period 结构
+`.env` 已在 `.gitignore` 中忽略。
 
-```go
-type Period struct {
-    Owner     string
-    StartTime time.Time
-    EndTime   time.Time
-}
+真实预约测试会创建并立即取消一个预约，默认跳过，只有显式设置环境变量才会运行：
+
+```bash
+REAL_BOOKING=1 go test -run TestReserveAndCancelRealBooking -v
 ```
 
-### 可用房间
+## 安全说明
 
-项目预定义了以下房间 ID：
-
-| 房间代码 | 房间 ID   | 描述                       |
-| -------- | --------- | -------------------------- |
-| n1       | 101699179 | 南湖分馆一楼开敞座位区     |
-| n1m      | 101699187 | 南湖分馆一楼中庭开敞座位区 |
-| n2       | 101699189 | 南湖分馆二楼开敞座位区     |
-
-使用方式：
-
-```go
-roomID := library_reservation.Rooms["n1m"]
-```
-
-## 高级用法
-
-### 自定义预约逻辑
-
-```go
-// 查询所有座位（包括已被占用的）
-seats, err := reverser.GetSeatsByTime(ctx, stuId, roomID, startTime, endTime, false)
-
-// 分析每个座位的空闲时间段
-for _, seat := range seats {
-    isFree, freePeriods := seat.IsFree(startTime, endTime)
-    if isFree {
-        fmt.Printf("座位 %s 完全空闲\n", seat.SeatName)
-    } else if len(freePeriods) > 0 {
-        fmt.Printf("座位 %s 部分空闲，空闲时间段:\n", seat.SeatName)
-        for _, period := range freePeriods {
-            fmt.Printf("  %s - %s\n",
-                period.StartTime.Format("15:04"),
-                period.EndTime.Format("15:04"))
-        }
-    }
-}
-```
-
-### 批量预约
-
-```go
-// 为多个用户预约座位
-users := []struct {
-    stuId    string
-    password string
-}{
-    {"学号1", "密码1"},
-    {"学号2", "密码2"},
-}
-
-for _, user := range users {
-    err := auth.StoreStuInfo(ctx, user.stuId, user.password)
-    if err != nil {
-        log.Printf("存储用户 %s 信息失败: %v", user.stuId, err)
-        continue
-    }
-
-    seats, err := reverser.GetSeatsByTime(ctx, user.stuId, roomID, startTime, endTime, true)
-    if err != nil || len(seats) == 0 {
-        log.Printf("用户 %s 无可用座位", user.stuId)
-        continue
-    }
-
-    // 选择第一个可用座位
-    err = reverser.Reverse(ctx, user.stuId, seats[0].SeatID, startTime, endTime)
-    if err != nil {
-        log.Printf("用户 %s 预约失败: %v", user.stuId, err)
-    } else {
-        log.Printf("用户 %s 预约成功", user.stuId)
-    }
-}
-```
-
-
-## 注意事项
-1. **安全性**：请妥善保管学号和密码，不要在公共代码库中硬编码
-2. **使用频率**：避免频繁请求，以免对图书馆系统造成压力
-3. **遵守规定**：请遵守图书馆的使用规定和预约政策
-4. **时区设置**：所有时间操作均使用 Asia/Shanghai 时区
-
-## 故障排除
+1. 不要提交 `.env` 或硬编码学号密码；
+2. 避免高频请求，以免给图书馆系统造成压力；
+3. 遵守图书馆的预约规则和使用政策；
+4. 所有时间均按 `Asia/Shanghai` 处理。
 
 ## 许可证
 
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
+本项目采用 MIT 许可证，详见 [LICENSE](LICENSE)。
 
 ## 免责声明
 
-本项目仅供学习和研究使用，请遵守华中师范大学图书馆的相关规定。开发者不对因使用本项目而产生的任何问题负责。
-
-
----
-
-**提示**：使用前请确保你已经阅读并理解图书馆的预约规则，合理使用预约系统。
+本项目仅供学习和研究使用。开发者不对因使用本项目产生的任何问题负责。
